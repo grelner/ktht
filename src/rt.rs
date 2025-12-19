@@ -80,13 +80,13 @@ where
     /// - The function panics if `core_affinity::get_core_ids()` fails to enumerate CPU cores.
     ///
     /// ```
-    fn new(parallelism: u8, func: F) -> Self {
-        let mut shards = Vec::with_capacity(parallelism as usize);
+    fn new(max_threads: u8, func: F) -> Self {
+        let mut shards = Vec::with_capacity(max_threads as usize);
         // enumerate available cores
         for core_id in core_affinity::get_core_ids()
             .expect("Could not enumerate cores")
             .into_iter()
-            .take(parallelism as usize)
+            .take(max_threads as usize)
         {
             let f = func.clone();
             // spsc would be better here, but let's keep our dependencies simple for this exercise
@@ -123,7 +123,7 @@ where
     ///       new items unless an unexpected condition occurs.
     ///
     /// ```
-    fn process_item(&self, item: T)  {
+    fn process_item(&self, item: T) {
         let shard_id = item.shard_id(self.shards.len() as u8);
         let (tx, _) = &self.shards[shard_id];
         tx.send(item).expect("Could not submit item to thread pool"); // this would be a bug
@@ -193,14 +193,50 @@ where
     /// - The function may panic if the `parallelism` level is set to `0` or if other invariants of the internal processing mechanism are violated.
     /// ```
     pub fn try_fold<E>(
-        parallelism: u8,
+        max_threads: u8,
         func: F,
         items: impl Iterator<Item = Result<T, E>>,
     ) -> Result<impl Iterator<Item = S>, E> {
-        let rt = Self::new(parallelism, func);
+        let rt = Self::new(max_threads, func);
         for item in items {
             rt.process_item(item?)
         }
         Ok(rt.finish().into_iter())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::convert::Infallible;
+
+    #[test]
+    fn test_runtime() {
+        struct Item {
+            id: u32,
+            value: u32,
+        }
+        impl Shardable for Item {
+            fn shard_id(&self, num_shards: u8) -> usize {
+                self.id as usize % num_shards as usize
+            }
+        }
+
+        let result = ShardedThreadPerCoreRuntime::<Item, _, [u32; 2]>::try_fold(
+            4,
+            |s, x| s[x.id as usize] += x.value,
+            vec![
+                Ok::<_, Infallible>(Item { id: 0, value: 1 }),
+                Ok(Item { id: 1, value: 2 }),
+                Ok(Item { id: 0, value: 3 }),
+                Ok(Item { id: 1, value: 4 }),
+            ]
+            .into_iter(),
+        )
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| [a[0] + b[0], a[1] + b[1]])
+        .unwrap();
+        assert_eq!(result, [4, 6]);
     }
 }

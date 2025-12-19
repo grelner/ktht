@@ -122,6 +122,9 @@ mod tests {
         let mut writer = AccountCsvWriter::new(Vec::new());
         writer.write_account(1, &Account::default()).unwrap();
         writer.write_account(2, &Account::default()).unwrap();
-        assert_eq!(String::from_utf8(writer.writer.into_inner().unwrap()).unwrap(), "client,available,held,total,locked\n1,0.0,0.0,0.0,false\n2,0.0,0.0,0.0,false\n");
+        assert_eq!(
+            String::from_utf8(writer.writer.into_inner().unwrap()).unwrap(),
+            "client,available,held,total,locked\n1,0.0,0.0,0.0,false\n2,0.0,0.0,0.0,false\n"
+        );
     }
 }
