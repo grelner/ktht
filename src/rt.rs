@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::sync::mpsc::{SendError, Sender};
+use std::sync::mpsc::Sender;
 use std::thread::{JoinHandle, spawn};
 
 /// This implements a toy share nothing/thread per core sharded execution strategy where items of
