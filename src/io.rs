@@ -115,7 +115,7 @@ mod tests {
         accounts.deposit(2, 2, 2.123456).unwrap();
         accounts.dispute(2, 2).unwrap();
         let mut accounts = accounts.into_iter().collect::<Vec<_>>();
-        accounts.sort_by(|(a, _), (b, _) | a.cmp(b));
+        accounts.sort_by(|(a, _), (b, _)| a.cmp(b));
         for (client_id, account) in accounts {
             writer.write_account(client_id, &account).unwrap();
         }
