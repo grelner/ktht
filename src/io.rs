@@ -26,6 +26,7 @@ pub struct CsvTransaction {
 }
 
 impl CsvTransaction {
+    /// Execute the appropriate method on `Accounts` based on the transaction type.
     pub fn execute_transaction(&self, accounts: &mut Accounts) -> Result<(), TransactionError> {
         match self.tx_type {
             CsvTransactionType::Deposit => accounts.deposit(self.client, self.tx, self.amount),
@@ -65,6 +66,7 @@ pub struct AccountStateCsv {
 }
 
 impl AccountStateCsv {
+    /// Generate a csv output row from an `Account`
     pub fn from_account(client_id: ClientId, account: &Account) -> Self {
         Self {
             client: client_id,
