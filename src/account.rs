@@ -1,5 +1,5 @@
 use fnv::FnvHashMap;
-use std::collections::hash_map::Entry;
+use std::collections::hash_map;
 
 pub type TxId = u32;
 pub type ClientId = u16;
@@ -43,8 +43,8 @@ impl Account {
     pub fn deposit(&mut self, tx_id: TxId, amount: Amount) -> Result<(), TransactionError> {
         self.check_not_locked()?;
         match self.deposits.entry(tx_id) {
-            Entry::Occupied(_) => Err(TransactionError::DuplicateTransaction),
-            Entry::Vacant(entry) => {
+            hash_map::Entry::Occupied(_) => Err(TransactionError::DuplicateTransaction),
+            hash_map::Entry::Vacant(entry) => {
                 entry.insert(Deposit {
                     amount,
                     disputed: false,
@@ -75,13 +75,13 @@ impl Account {
     /// A dispute represents a client's claim that a transaction was erroneous and should be reversed.
     ///
     /// The transaction shouldn't be reversed yet but the associated funds should be held. This means
-    /// that the clients available funds should decrease by the amount disputed, their held funds should
+    /// that the clients' available funds should decrease by the amount disputed, their held funds should
     /// increase by the amount disputed, while their total funds should remain the same.
     ///
     /// # Errors
-    /// - `AlreadyDisputed` if the transaction is already in disputed state
-    /// - `TransactionNotFound` if the transaction does not exist
-    /// - `AccountLocked` if the account is locked
+    /// - `AlreadyDisputed` if the transaction is already in the disputed state.
+    /// - `TransactionNotFound` if the transaction does not exist.
+    /// - `AccountLocked` if the account is locked.
     pub fn dispute(&mut self, tx_id: TxId) -> Result<(), TransactionError> {
         self.check_not_locked()?;
         if let Some(disputed_deposit) = self.deposits.get_mut(&tx_id) {
@@ -147,6 +147,7 @@ impl Account {
         }
     }
 
+    /// Return `Err(TransactionError::AccountLocked)` if the account is locked. Otherwise, Ok(()).
     #[inline]
     fn check_not_locked(&self) -> Result<(), TransactionError> {
         if self.locked {
@@ -156,18 +157,22 @@ impl Account {
         }
     }
 
+    /// Available funds
     pub fn available(&self) -> f64 {
         self.total - self.held
     }
 
+    /// Total funds, e.g., available plus held
     pub fn total(&self) -> f64 {
         self.total
     }
 
+    /// Held funds, e.g., funds that are disputed
     pub fn held(&self) -> f64 {
         self.held
     }
 
+    /// Indicates whether the account is locked.
     pub fn is_locked(&self) -> bool {
         self.locked
     }
@@ -212,8 +217,13 @@ impl Accounts {
     pub fn chargeback(&mut self, client_id: ClientId, tx_id: TxId) -> Result<(), TransactionError> {
         self.client_account(client_id).chargeback(tx_id)
     }
+}
 
-    pub fn into_iter(self) -> impl Iterator<Item = (ClientId, Account)> {
+impl IntoIterator for Accounts {
+    type Item = (ClientId, Account);
+    type IntoIter = hash_map::IntoIter<ClientId, Account>;
+
+    fn into_iter(self) -> Self::IntoIter {
         self.accounts.into_iter()
     }
 }
