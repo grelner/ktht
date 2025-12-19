@@ -1,7 +1,7 @@
 use crate::account::{Account, Accounts, Amount, ClientId, TransactionError, TxId};
 use crate::rt::Shardable;
 use csv::Trim;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::io::{Read, Write};
 
 /// Represents a transaction type in the csv input format
@@ -55,43 +55,30 @@ pub fn csv_transaction_reader<R: Read>(
         .into_deserialize()
 }
 
-/// The csv output format for account state
-#[derive(Serialize)]
-pub struct AccountStateCsv {
-    client: ClientId,
-    available: f64,
-    held: f64,
-    total: f64,
-    locked: bool,
-}
-
-impl AccountStateCsv {
-    /// Generate a csv output row from an `Account`
-    pub fn from_account(client_id: ClientId, account: &Account) -> Self {
-        Self {
-            client: client_id,
-            available: account.available(),
-            held: account.held(),
-            total: account.total(),
-            locked: account.is_locked(),
-        }
-    }
-}
-
 /// A writer for the csv output format.
 pub struct AccountCsvWriter<W: Write> {
-    writer: csv::Writer<W>,
+    writer: W,
 }
 
 impl<W: Write> AccountCsvWriter<W> {
     pub fn new(writer: W) -> Self {
-        Self {
-            writer: csv::Writer::from_writer(writer),
-        }
+        Self { writer }
     }
-    pub fn write_account(&mut self, client_id: ClientId, account: &Account) -> csv::Result<()> {
-        self.writer
-            .serialize(AccountStateCsv::from_account(client_id, account))
+
+    pub fn write_header(&mut self) -> std::io::Result<()> {
+        writeln!(self.writer, "client,available,held,total,locked")
+    }
+
+    pub fn write_account(&mut self, client_id: ClientId, account: &Account) -> std::io::Result<()> {
+        // ensure our output floats have at most 4 decimal places
+        let available = f64::trunc(account.available() * 10000.0) / 10000.0;
+        let held = f64::trunc(account.held() * 10000.0) / 10000.0;
+        let total = f64::trunc(account.total() * 10000.0) / 10000.0;
+        writeln!(
+            self.writer,
+            "{client_id},{available},{held},{total},{}",
+            account.is_locked()
+        )
     }
 }
 
@@ -122,11 +109,21 @@ mod tests {
     #[test]
     fn test_csv_writer() {
         let mut writer = AccountCsvWriter::new(Vec::new());
-        writer.write_account(1, &Account::default()).unwrap();
-        writer.write_account(2, &Account::default()).unwrap();
+        writer.write_header().unwrap();
+        let mut accounts = Accounts::default();
+        accounts.deposit(1, 1, 1.123456).unwrap();
+        accounts.deposit(2, 2, 2.123456).unwrap();
+        accounts.dispute(2, 2).unwrap();
+        let mut accounts = accounts.into_iter().collect::<Vec<_>>();
+        accounts.sort_by(|(a, _), (b, _) | a.cmp(b));
+        for (client_id, account) in accounts {
+            writer.write_account(client_id, &account).unwrap();
+        }
         assert_eq!(
-            String::from_utf8(writer.writer.into_inner().unwrap()).unwrap(),
-            "client,available,held,total,locked\n1,0.0,0.0,0.0,false\n2,0.0,0.0,0.0,false\n"
+            String::from_utf8(writer.writer).unwrap(),
+            "client,available,held,total,locked\n\
+            1,1.1234,0,1.1234,false\n\
+            2,0,2.1234,2.1234,false\n"
         );
     }
 }

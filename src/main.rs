@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_file = std::env::args().nth(1).expect("No input file provided");
     let tx_reader = io::csv_transaction_reader(File::open(input_file)?);
     let mut tx_writer = io::AccountCsvWriter::new(stdout());
+    tx_writer.write_header()?;
     rt::ShardedThreadPerCoreRuntime::try_fold(
         // The number of threads used by the system is the number of cores + 1, but since the main
         // thread is mostly IO-bound, this should be ok. In a real system, this would be handled
