@@ -45,12 +45,9 @@ where
     S: Default + Send + 'static,
 {
     /// ```rust
-    /// Creates a new instance of the struct that manages parallelism by processing data
-    /// across a specified number of worker threads, each pinned to its own CPU core.
-    ///
     /// # Parameters
-    /// - `parallelism`: The number of worker threads to spawn. Each thread will be pinned to a different CPU core.
-    ///   The value must not exceed the number of available CPU cores to avoid thread contention.
+    /// - `max_threads`: The maximum number of worker threads to spawn. Each thread will be pinned to a different CPU core.
+    ///   The system will never spawn more threads than the number of available cores.
     /// - `func`: A closure or function that takes mutable access to a state object of type `S` and processes an
     ///   incoming item. This function is invoked for each item received in the thread's input queue.
     ///
@@ -62,13 +59,13 @@ where
     /// # Returns
     /// An instance of the struct containing worker threads, each associated with:
     /// - A transmission channel to send tasks into the thread.
-    /// - A join handle to track the lifecycle of the thread.
+    /// - A join handle that allows retrieving the final state produced by the thread once it exits.
     ///
     /// # Implementation Details
     /// - The method determines the available CPU cores using `core_affinity::get_core_ids()` and assigns threads
     ///   to specific cores using `core_affinity::set_for_current(core_id)`. This ensures better cache locality and
     ///   reduces thread contention.
-    /// - A `Vec` of capacity `parallelism` is used to store the tuple `(tx, join_handle)` for each worker thread:
+    /// - A `Vec` is used to store the tuple `(tx, join_handle)` for each worker thread:
     ///   - `tx`: Sender end of the mpsc (multi-producer, single-consumer) channel for dispatching tasks to the thread.
     ///   - `join_handle`: A `JoinHandle` for the thread, which can be used to wait for its completion or retrieve
     ///     its final state.
@@ -102,6 +99,7 @@ where
             });
             shards.push((tx, join_handle));
         }
+        shards.shrink_to_fit();
         Self {
             shards,
             _t: PhantomData,
@@ -170,27 +168,14 @@ where
     ///   - On success, returns an iterator over the processed items of type `S`.
     ///   - On failure, if any item yields an error during processing, returns the first encountered error of type `E`.
     ///
-    /// # Example
-    /// ```
-    /// let input = vec![
-    ///     Ok(1),
-    ///     Ok(2),
-    ///     Ok(3),
-    /// ];
-    /// let result: Result<Vec<_>, _> = try_fold(4, |x| x * 2, input.into_iter())?
-    ///     .collect();
-    /// assert_eq!(result, vec![2, 4, 6]);
-    /// ```
-    ///
     /// # Errors
     /// If any item from the input iterator is an `Err`, processing will halt, and the first encountered error will be returned.
     ///
     /// # Notes
-    /// - This function leverages internal parallelism to process items concurrently, based on the specified `parallelism` level.
     /// - All items must be valid (i.e., `Ok` variants of the `Result`) for the function to succeed.
     ///
     /// # Panics
-    /// - The function may panic if the `parallelism` level is set to `0` or if other invariants of the internal processing mechanism are violated.
+    /// - The function will panic if `max_threads` is set to `0`.
     /// ```
     pub fn try_fold<E>(
         max_threads: u8,
