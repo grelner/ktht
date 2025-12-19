@@ -44,6 +44,42 @@ where
     F: Fn(&mut S, T) + Clone + Send + 'static,
     S: Default + Send + 'static,
 {
+    /// ```rust
+    /// Creates a new instance of the struct that manages parallelism by processing data
+    /// across a specified number of worker threads, each pinned to its own CPU core.
+    ///
+    /// # Parameters
+    /// - `parallelism`: The number of worker threads to spawn. Each thread will be pinned to a different CPU core.
+    ///   The value must not exceed the number of available CPU cores to avoid thread contention.
+    /// - `func`: A closure or function that takes mutable access to a state object of type `S` and processes an
+    ///   incoming item. This function is invoked for each item received in the thread's input queue.
+    ///
+    /// # Type Parameters
+    /// - `F`: The type of the function or closure passed in `func`.
+    /// - `S`: The state object type to be used and modified within each worker thread. Must implement the `Default`
+    ///   trait for initialization.
+    ///
+    /// # Returns
+    /// An instance of the struct containing worker threads, each associated with:
+    /// - A transmission channel to send tasks into the thread.
+    /// - A join handle to track the lifecycle of the thread.
+    ///
+    /// # Implementation Details
+    /// - The method determines the available CPU cores using `core_affinity::get_core_ids()` and assigns threads
+    ///   to specific cores using `core_affinity::set_for_current(core_id)`. This ensures better cache locality and
+    ///   reduces thread contention.
+    /// - A `Vec` of capacity `parallelism` is used to store the tuple `(tx, join_handle)` for each worker thread:
+    ///   - `tx`: Sender end of the mpsc (multi-producer, single-consumer) channel for dispatching tasks to the thread.
+    ///   - `join_handle`: A `JoinHandle` for the thread, which can be used to wait for its completion or retrieve
+    ///     its final state.
+    /// - Each worker thread initializes its own state object using `S::default()`, and processes tasks by receiving
+    ///   items from the channel and passing them to `func`.
+    /// - When the channel closes, the thread exits, and its final state is returned (if joined).
+    ///
+    /// # Panics
+    /// - The function panics if `core_affinity::get_core_ids()` fails to enumerate CPU cores.
+    ///
+    /// ```
     fn new(parallelism: u8, func: F) -> Self {
         let mut shards = Vec::with_capacity(parallelism as usize);
         // enumerate available cores
@@ -74,14 +110,40 @@ where
         }
     }
 
+    /// ```rust
+    /// Processes an item by determining its shard and sending it to the appropriate thread pool.
     ///
+    /// # Parameters
+    /// - `item: T` - The item to be processed, where `T` must implement `Shardable`.
+    ///
+    /// # Panics
+    /// - This function will panic if:
+    ///     - The `send` operation on the transmitter fails. This indicates a bug in the
+    ///       program because the shard's thread pool should always be able to accept
+    ///       new items unless an unexpected condition occurs.
+    ///
+    /// ```
     fn process_item(&self, item: T)  {
         let shard_id = item.shard_id(self.shards.len() as u8);
         let (tx, _) = &self.shards[shard_id];
         tx.send(item).expect("Could not submit item to thread pool"); // this would be a bug
     }
 
-    /// Shut down the thread pool and collect the final state of each shard.
+    /// ```rust
+    /// Finalizes the current operation and collects the results from all shards.
+    ///
+    /// This method processes each shard by performing the following steps:
+    /// 1. Drops the sender (`tx`) associated with each shard. This ensures that the receiver (`recv`)
+    ///    of the corresponding shard will return an error, signaling the thread to exit its processing loop.
+    /// 2. Joins the thread handle (`join_handle`) associated with each shard to retrieve the final state
+    ///    produced by that shard's thread. If the thread panics during execution, this method will
+    ///    panic as well, as this indicates a bug in the threading logic or shard processing.
+    ///
+    /// # Returns
+    /// A `Vec<S>` containing the final states of all shards after their respective threads have completed
+    /// execution.
+    ///
+    /// ```
     fn finish(self) -> Vec<S> {
         let mut result = Vec::with_capacity(self.shards.len());
         for (tx, join_handle) in self.shards {
@@ -94,8 +156,42 @@ where
         result
     }
 
-    /// Create a runtime with `parallelism` threads, and optionally fold each item in `items`
-    /// into an instance of `S` via `func`, which has signature (&mut S, T)
+    /// ```
+    /// Consumes an iterator over `Result<T, E>` items and processes them in parallel using the
+    /// specified number of worker threads by applying function `func` to each item.
+    ///
+    /// # Parameters
+    /// - `parallelism`: The level of parallelism, specified as the number of concurrent workers to process items.
+    /// - `func`: A closure or function that takes an input of type `T` and produces a transformed output of type `S`.
+    /// - `items`: An iterator over `Result<T, E>` items, where `T` is the input type and `E` is the error type.
+    ///
+    /// # Returns
+    /// - `Result<impl Iterator<Item = S>, E>`:
+    ///   - On success, returns an iterator over the processed items of type `S`.
+    ///   - On failure, if any item yields an error during processing, returns the first encountered error of type `E`.
+    ///
+    /// # Example
+    /// ```
+    /// let input = vec![
+    ///     Ok(1),
+    ///     Ok(2),
+    ///     Ok(3),
+    /// ];
+    /// let result: Result<Vec<_>, _> = try_fold(4, |x| x * 2, input.into_iter())?
+    ///     .collect();
+    /// assert_eq!(result, vec![2, 4, 6]);
+    /// ```
+    ///
+    /// # Errors
+    /// If any item from the input iterator is an `Err`, processing will halt, and the first encountered error will be returned.
+    ///
+    /// # Notes
+    /// - This function leverages internal parallelism to process items concurrently, based on the specified `parallelism` level.
+    /// - All items must be valid (i.e., `Ok` variants of the `Result`) for the function to succeed.
+    ///
+    /// # Panics
+    /// - The function may panic if the `parallelism` level is set to `0` or if other invariants of the internal processing mechanism are violated.
+    /// ```
     pub fn try_fold<E>(
         parallelism: u8,
         func: F,
