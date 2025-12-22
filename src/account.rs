@@ -16,6 +16,7 @@ pub enum TransactionError {
     AlreadyDisputed,
     TransactionNotFound,
     DuplicateTransaction,
+    InvalidAmount,
 }
 
 struct Deposit {
@@ -42,6 +43,9 @@ impl Account {
     /// - `AccountLocked` if the account is locked
     pub fn deposit(&mut self, tx_id: TxId, amount: Amount) -> Result<(), TransactionError> {
         self.check_not_locked()?;
+        if amount <= 0.0 {
+            return Err(TransactionError::InvalidAmount);
+        }
         match self.deposits.entry(tx_id) {
             hash_map::Entry::Occupied(_) => Err(TransactionError::DuplicateTransaction),
             hash_map::Entry::Vacant(entry) => {
@@ -63,6 +67,9 @@ impl Account {
     /// - `AccountLocked` if the account is locked
     pub fn withdraw(&mut self, amount: Amount) -> Result<(), TransactionError> {
         self.check_not_locked()?;
+        if amount <= 0.0 {
+            return Err(TransactionError::InvalidAmount);
+        }
         let amount = amount as f64;
         if self.available() < amount {
             Err(TransactionError::InsufficientFunds)
@@ -315,6 +322,16 @@ mod tests {
     #[test]
     fn test_deposit_withdraw() {
         let mut account = Account::default();
+        assert!(account.deposit(1, 100.0).is_ok());
+        assert!(account.withdraw(99.0).is_ok());
+        assert_balances(&account, 1.0, 0.0, 1.0);
+    }
+
+    #[test]
+    fn test_negative_amount() {
+        let mut account = Account::default();
+        assert!(matches!(account.deposit(1, -100.0), Err(TransactionError::InvalidAmount)));
+        assert!(matches!(account.withdraw(-100.0), Err(TransactionError::InvalidAmount)));
         assert!(account.deposit(1, 100.0).is_ok());
         assert!(account.withdraw(99.0).is_ok());
         assert_balances(&account, 1.0, 0.0, 1.0);
